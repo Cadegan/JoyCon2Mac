@@ -7,6 +7,8 @@
 
 Ce document est destiné à d'autres IA travaillant sur ce projet. Il résume ce que j'ai trouvé, ce qui est sûr, ce qui ne l'est pas, et ce qu'il faut corriger.
 
+> **Plan actif avant test matériel** : consulter [`HARDWARE_TEST_ROADMAP.md`](HARDWARE_TEST_ROADMAP.md). Ce plan tient compte des modifications effectuées après le présent audit.
+
 ---
 
 ## 1. Qu'est-ce que ce projet ?
