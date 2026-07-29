@@ -79,6 +79,7 @@ swiftc \
     -framework SwiftUI \
     -framework AppKit \
     -framework Combine \
+    -framework ServiceManagement \
     -framework SystemExtensions \
     -framework UniformTypeIdentifiers \
     "$ROOT_DIR"/JoyCon2MacApp/*.swift \

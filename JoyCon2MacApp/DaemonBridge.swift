@@ -84,6 +84,23 @@ enum MouseSource: Int {
     }
 }
 
+enum StickTuning {
+    static let defaultDeadzone = 0.08
+    static let deadzoneRange = 0.0...0.3
+    static let defaultSensitivity = 1.7
+    static let sensitivityRange = 0.5...2.0
+
+    static func deadzone(_ value: Double) -> Double {
+        guard value.isFinite else { return defaultDeadzone }
+        return max(deadzoneRange.lowerBound, min(deadzoneRange.upperBound, value))
+    }
+
+    static func sensitivity(_ value: Double) -> Double {
+        guard value.isFinite else { return defaultSensitivity }
+        return max(sensitivityRange.lowerBound, min(sensitivityRange.upperBound, value))
+    }
+}
+
 struct NFCDecodedRecord: Identifiable, Equatable {
     var id: String { "\(label)\u{1f}\(value)" }
     var label: String
@@ -133,11 +150,61 @@ enum NFCDecoder {
 
     private static func decodeNDEFContainers(in data: Data) -> [NFCDecodedRecord] {
         let bytes = Array(data)
-        var records = decodeTLV(from: bytes, offset: 0)
-        if records.isEmpty {
-            records.append(contentsOf: decodeNDEFRecords(bytes))
+        guard !bytes.isEmpty else { return [] }
+
+        // A complete NFC Forum Type 2 tag starts with 12 bytes of
+        // manufacturer data, followed by the four-byte Capability Container.
+        // Its TLV area therefore begins at byte 16. JoyCon2Mac publishes that
+        // complete raw tag, rather than a buffer already sliced to the TLV.
+        if bytes.count > 16, bytes[12] == 0xE1 {
+            let records = decodeTLV(from: bytes, offset: 16)
+            if !records.isEmpty {
+                return records
+            }
         }
-        return records
+
+        // Older/diagnostic frames may wrap the tag differently. Search only
+        // plausible TLV or NDEF starts, instead of reparsing the remainder of
+        // the buffer from every byte (the former O(n²) implementation).
+        for offset in bytes.indices where bytes[offset] == 0x03 {
+            let records = decodeNDEFTLV(from: bytes, offset: offset)
+            if !records.isEmpty {
+                return records
+            }
+        }
+
+        for offset in bytes.indices {
+            let header = bytes[offset]
+            let tnf = header & 0x07
+            guard (header & 0x80) != 0, tnf != 0x00, tnf != 0x07 else {
+                continue
+            }
+            let records = decodeNDEFRecords(Array(bytes[offset...]))
+            if !records.isEmpty {
+                return records
+            }
+        }
+        return []
+    }
+
+    private static func decodeNDEFTLV(from bytes: [UInt8], offset: Int) -> [NFCDecodedRecord] {
+        guard offset >= 0, offset < bytes.count, bytes[offset] == 0x03 else {
+            return []
+        }
+
+        var index = offset + 1
+        guard index < bytes.count else { return [] }
+        var length = Int(bytes[index])
+        index += 1
+
+        if length == 0xFF {
+            guard index + 1 < bytes.count else { return [] }
+            length = (Int(bytes[index]) << 8) | Int(bytes[index + 1])
+            index += 2
+        }
+
+        guard index + length <= bytes.count else { return [] }
+        return decodeNDEFRecords(Array(bytes[index..<index + length]))
     }
 
     private static func decodeTLV(from bytes: [UInt8], offset: Int) -> [NFCDecodedRecord] {
@@ -172,6 +239,7 @@ enum NFCDecoder {
     private static func decodeNDEFRecords(_ bytes: [UInt8]) -> [NFCDecodedRecord] {
         var index = 0
         var decoded: [NFCDecodedRecord] = []
+        var isFirstRecord = true
 
         while index < bytes.count {
             let header = bytes[index]
@@ -183,7 +251,9 @@ enum NFCDecoder {
             let hasID = (header & 0x08) != 0
             let tnf = header & 0x07
 
-            if !messageBegin || tnf == 0x00 {
+            if (isFirstRecord && !messageBegin) ||
+                (!isFirstRecord && messageBegin) ||
+                tnf == 0x00 {
                 break
             }
 
@@ -225,6 +295,7 @@ enum NFCDecoder {
             index += payloadLength
 
             decoded.append(contentsOf: decodeRecord(tnf: tnf, type: typeData, payload: payload))
+            isFirstRecord = false
             if messageEnd { break }
         }
         return decoded
@@ -412,7 +483,7 @@ class DaemonBridge: ObservableObject {
             FileManager.default.createFile(atPath: url.path, contents: nil)
         }
         traceFileHandle = try? FileHandle(forWritingTo: url)
-        try? traceFileHandle?.seekToEnd()
+        _ = try? traceFileHandle?.seekToEnd()
     }
 
     private func writeTrace(_ line: String) {
@@ -585,6 +656,10 @@ class DaemonBridge: ObservableObject {
             // previous session don't get re-applied.
             let controlPath = supportDir.appendingPathComponent("control.jsonl")
             try Data().write(to: controlPath, options: .atomic)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: controlPath.path
+            )
             daemonControlPath = controlPath
             TelemetryStore.shared.setLogPath(logPath)
             // Open (shared-append) the same input-trace.log the daemon is
@@ -1233,11 +1308,11 @@ class DaemonBridge: ObservableObject {
     }
 
     func setDeadzone(_ value: Double) {
-        sendControlCommand(["cmd": "setDeadzone", "value": value])
+        sendControlCommand(["cmd": "setDeadzone", "value": StickTuning.deadzone(value)])
     }
 
     func setStickSensitivity(_ value: Double) {
-        sendControlCommand(["cmd": "setStickSensitivity", "value": value])
+        sendControlCommand(["cmd": "setStickSensitivity", "value": StickTuning.sensitivity(value)])
     }
 
     func setRailBindings(_ bindings: [String: String]) {
@@ -1252,9 +1327,15 @@ class DaemonBridge: ObservableObject {
             "rightSL": defaults.string(forKey: "railBinding.rightSL") ?? "none",
             "rightSR": defaults.string(forKey: "railBinding.rightSR") ?? "none"
         ])
-        let deadzone = defaults.object(forKey: "deadzone") as? Double ?? 0.08
+        let deadzone = StickTuning.deadzone(
+            defaults.object(forKey: "deadzone") as? Double ?? StickTuning.defaultDeadzone
+        )
+        defaults.set(deadzone, forKey: "deadzone")
         setDeadzone(deadzone)
-        let sensitivity = defaults.object(forKey: "stickSensitivity") as? Double ?? 1.0
+        let sensitivity = StickTuning.sensitivity(
+            defaults.object(forKey: "stickSensitivity") as? Double ?? StickTuning.defaultSensitivity
+        )
+        defaults.set(sensitivity, forKey: "stickSensitivity")
         setStickSensitivity(sensitivity)
     }
 

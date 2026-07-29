@@ -1,4 +1,5 @@
 import SwiftUI
+import ServiceManagement
 
 struct SettingsView: View {
     @EnvironmentObject var daemonBridge: DaemonBridge
@@ -7,14 +8,34 @@ struct SettingsView: View {
     @AppStorage("showNotifications") private var showNotifications = true
     @AppStorage("sdlOnlyMode") private var sdlOnlyMode = false
     @AppStorage("logLevel") private var logLevel = "Info"
-    @AppStorage("deadzone") private var deadzone: Double = 0.08
-    @AppStorage("stickSensitivity") private var stickSensitivity: Double = 1.0
+    @AppStorage("deadzone") private var deadzone: Double = StickTuning.defaultDeadzone
+    @AppStorage("stickSensitivity") private var stickSensitivity: Double = StickTuning.defaultSensitivity
+    @State private var launchAtLoginMessage: String?
+    @State private var launchAtLoginNeedsApproval = false
     
     var body: some View {
         Form {
             Section("General") {
-                Toggle("Launch at Login", isOn: $launchAtLogin)
+                Toggle(
+                    "Launch at Login",
+                    isOn: Binding(
+                        get: { launchAtLogin },
+                        set: { updateLaunchAtLogin($0) }
+                    )
+                )
                     .help("Automatically start JoyCon2Mac when you log in")
+
+                if let launchAtLoginMessage {
+                    Text(launchAtLoginMessage)
+                        .font(.caption)
+                        .foregroundColor(launchAtLoginNeedsApproval ? .orange : .red)
+
+                    if launchAtLoginNeedsApproval {
+                        Button("Open Login Items Settings") {
+                            SMAppService.openSystemSettingsLoginItems()
+                        }
+                    }
+                }
                 
                 Toggle("Auto-Reconnect", isOn: $autoReconnect)
                     .help("Automatically reconnect to paired controllers")
@@ -117,7 +138,7 @@ struct SettingsView: View {
                                 daemonBridge.setDeadzone(newValue)
                             }
                         ),
-                        in: 0.0...0.3,
+                        in: StickTuning.deadzoneRange,
                         step: 0.01
                     )
                     Text("Ignore small stick movements below this threshold")
@@ -135,7 +156,7 @@ struct SettingsView: View {
                                 daemonBridge.setStickSensitivity(newValue)
                             }
                         ),
-                        in: 0.5...2.0,
+                        in: StickTuning.sensitivityRange,
                         step: 0.1
                     )
                     Text("Adjust analog stick response curve")
@@ -210,6 +231,9 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(minWidth: 500, minHeight: 600)
+        .onAppear {
+            syncLaunchAtLoginStatus()
+        }
     }
     
     func showLogs() {
@@ -258,6 +282,47 @@ struct SettingsView: View {
         Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1.0"
     }
 
+    private func syncLaunchAtLoginStatus() {
+        let status = SMAppService.mainApp.status
+        launchAtLoginNeedsApproval = status == .requiresApproval
+
+        switch status {
+        case .enabled:
+            launchAtLogin = true
+            launchAtLoginMessage = nil
+        case .requiresApproval:
+            launchAtLogin = false
+            launchAtLoginMessage = "Allow JoyCon2Mac in System Settings > General > Login Items to finish enabling this option."
+        case .notRegistered:
+            launchAtLogin = false
+            launchAtLoginMessage = nil
+        case .notFound:
+            launchAtLogin = false
+            launchAtLoginMessage = "Launch at login is unavailable for this build."
+        @unknown default:
+            launchAtLogin = false
+            launchAtLoginMessage = "Unable to determine the Login Item status."
+        }
+    }
+
+    private func updateLaunchAtLogin(_ enabled: Bool) {
+        let service = SMAppService.mainApp
+        do {
+            if enabled {
+                if service.status == .notRegistered || service.status == .notFound {
+                    try service.register()
+                }
+            } else if service.status != .notRegistered {
+                try service.unregister()
+            }
+            syncLaunchAtLoginStatus()
+        } catch {
+            syncLaunchAtLoginStatus()
+            launchAtLoginMessage = "Could not update Launch at Login: \(error.localizedDescription)"
+            launchAtLoginNeedsApproval = false
+        }
+    }
+
     func showCalibrationAlert() {
         let alert = NSAlert()
         alert.messageText = "Automatic Stick Calibration"
@@ -276,17 +341,17 @@ struct SettingsView: View {
                 // Import configuration
                 if let data = try? Data(contentsOf: url),
                    let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    launchAtLogin = config["launchAtLogin"] as? Bool ?? false
+                    updateLaunchAtLogin(config["launchAtLogin"] as? Bool ?? false)
                     autoReconnect = config["autoReconnect"] as? Bool ?? true
                     showNotifications = config["showNotifications"] as? Bool ?? true
                     sdlOnlyMode = config["sdlOnlyMode"] as? Bool ?? false
                     daemonBridge.setSDLOnlyMode(sdlOnlyMode)
                     logLevel = config["logLevel"] as? String ?? "Info"
-                    let rawDeadzone = config["deadzone"] as? Double ?? 0.08
-                    deadzone = max(0.0, min(0.3, rawDeadzone))
+                    let rawDeadzone = config["deadzone"] as? Double ?? StickTuning.defaultDeadzone
+                    deadzone = StickTuning.deadzone(rawDeadzone)
                     daemonBridge.setDeadzone(deadzone)
-                    let rawSensitivity = config["stickSensitivity"] as? Double ?? 1.0
-                    stickSensitivity = max(0.5, min(2.0, rawSensitivity))
+                    let rawSensitivity = config["stickSensitivity"] as? Double ?? StickTuning.defaultSensitivity
+                    stickSensitivity = StickTuning.sensitivity(rawSensitivity)
                     daemonBridge.setStickSensitivity(stickSensitivity)
                 }
             }
@@ -316,16 +381,16 @@ struct SettingsView: View {
         alert.addButton(withTitle: "Cancel")
         
         if alert.runModal() == .alertFirstButtonReturn {
-            launchAtLogin = false
+            updateLaunchAtLogin(false)
             autoReconnect = true
             showNotifications = true
             sdlOnlyMode = false
             daemonBridge.setSDLOnlyMode(false)
             logLevel = "Info"
-            deadzone = 0.08
-            daemonBridge.setDeadzone(0.08)
-            stickSensitivity = 1.0
-            daemonBridge.setStickSensitivity(1.0)
+            deadzone = StickTuning.defaultDeadzone
+            daemonBridge.setDeadzone(StickTuning.defaultDeadzone)
+            stickSensitivity = StickTuning.defaultSensitivity
+            daemonBridge.setStickSensitivity(StickTuning.defaultSensitivity)
         }
     }
 }

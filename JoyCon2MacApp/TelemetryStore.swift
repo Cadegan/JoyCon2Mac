@@ -48,10 +48,11 @@ class TelemetryStore: ObservableObject {
     }
 
     func clear() {
-        pendingLines.removeAll()
-        coalesceTimer?.invalidate()
-        coalesceTimer = nil
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.pendingLines.removeAll()
+            self.coalesceTimer?.invalidate()
+            self.coalesceTimer = nil
             self.displayedOutput = ""
             self.telemetryLineCount = 0
         }

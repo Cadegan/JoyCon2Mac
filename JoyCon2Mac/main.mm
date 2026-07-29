@@ -582,13 +582,13 @@ static void applyControlCommand(NSDictionary *command) {
         NSNumber *value = command[@"value"];
         if ([value isKindOfClass:[NSNumber class]]) {
             SetStickDeadzone(value.floatValue);
-            emitDaemonEvent("deadzone", [[NSString stringWithFormat:@"applied=%.2f", value.floatValue] UTF8String]);
+            emitDaemonEvent("deadzone", [[NSString stringWithFormat:@"applied=%.2f", GetStickDeadzone()] UTF8String]);
         }
     } else if ([cmd isEqualToString:@"setStickSensitivity"]) {
         NSNumber *value = command[@"value"];
         if ([value isKindOfClass:[NSNumber class]]) {
             SetStickSensitivity(value.floatValue);
-            emitDaemonEvent("stickSensitivity", [[NSString stringWithFormat:@"applied=%.2f", value.floatValue] UTF8String]);
+            emitDaemonEvent("stickSensitivity", [[NSString stringWithFormat:@"applied=%.2f", GetStickSensitivity()] UTF8String]);
         }
     } else {
         emitDaemonEvent("controlUnknown",
@@ -643,12 +643,17 @@ static void pollControlFile() {
 static void startControlFilePolling(NSString *path) {
     if (!path) return;
     g_controlFilePath = [path copy];
-    // Ensure the file exists with restricted permissions (0600) so the GUI's append-open doesn't race us
+    // Enforce owner-only access even when the GUI created or atomically
+    // replaced the file before launching us.
+    NSDictionary *fileAttrs = @{ NSFilePosixPermissions: @(0600) };
     if (![[NSFileManager defaultManager] fileExistsAtPath:g_controlFilePath]) {
-        NSDictionary *fileAttrs = @{ NSFilePosixPermissions: @(0600) };
         [[NSFileManager defaultManager] createFileAtPath:g_controlFilePath
                                                 contents:nil
                                               attributes:fileAttrs];
+    } else {
+        [[NSFileManager defaultManager] setAttributes:fileAttrs
+                                         ofItemAtPath:g_controlFilePath
+                                                error:nil];
     }
     NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:g_controlFilePath error:nil];
     g_controlFileOffset = [attrs[NSFileSize] unsignedLongLongValue];
@@ -819,8 +824,8 @@ static void printJSONState(const std::vector<uint8_t>& buffer, JoyConSide side, 
     int mouseSource = g_mouseEmitter ? (int)g_mouseEmitter.source : 0;
     const char *mouseActive = g_mouseEmitter && g_mouseEmitter.lastActiveSide == JoyConSide::Left ? "left" : "right";
 
-    char jsonBuf[1024];
-    snprintf(jsonBuf, sizeof(jsonBuf),
+    char jsonBuf[1536];
+    int jsonLength = snprintf(jsonBuf, sizeof(jsonBuf),
         "{\"event\":\"state\","
         "\"side\":\"%s\","
         "\"packetCount\":%u,"
@@ -834,17 +839,17 @@ static void printJSONState(const std::vector<uint8_t>& buffer, JoyConSide side, 
         "\"leftStickY\":%d,"
         "\"rightStickX\":%d,"
         "\"rightStickY\":%d,"
-        "\"gyroX\":%.2f,"
-        "\"gyroY\":%.2f,"
-        "\"gyroZ\":%.2f,"
-        "\"accelX\":%.2f,"
-        "\"accelY\":%.2f,"
-        "\"accelZ\":%.2f,"
+        "\"gyroX\":%.4f,"
+        "\"gyroY\":%.4f,"
+        "\"gyroZ\":%.4f,"
+        "\"accelX\":%.5f,"
+        "\"accelY\":%.5f,"
+        "\"accelZ\":%.5f,"
         "\"mouseX\":%d,"
         "\"mouseY\":%d,"
         "\"mouseDistance\":%u,"
-        "\"batteryVoltage\":%.2f,"
-        "\"batteryCurrent\":%.2f,"
+        "\"batteryVoltage\":%.3f,"
+        "\"batteryCurrent\":%.3f,"
         "\"batteryTemperature\":%.2f,"
         "\"batteryPercentage\":%.2f,"
         "\"triggerL\":%d,"
@@ -882,7 +887,11 @@ static void printJSONState(const std::vector<uint8_t>& buffer, JoyConSide side, 
         mouseMode,
         mouseSource,
         mouseActive);
-    emitJSONLine(jsonBuf);
+    if (jsonLength > 0 && static_cast<size_t>(jsonLength) < sizeof(jsonBuf)) {
+        emitJSONLine(jsonBuf);
+    } else {
+        emitDaemonEvent("stateEncoding", "JSON state buffer overflow");
+    }
 }
 
 void onJoyConData(const std::vector<uint8_t>& buffer, JoyConSide side) {

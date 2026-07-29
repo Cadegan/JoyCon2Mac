@@ -83,15 +83,23 @@ uint32_t ExtractButtonState(const std::vector<uint8_t>& buffer, JoyConSide side)
          |  uint32_t(buffer[btnOffset + 2]);
 }
 
+static constexpr float kMinStickDeadzone = 0.0f;
+static constexpr float kMaxStickDeadzone = 0.3f;
+static constexpr float kMinStickSensitivity = 0.5f;
+static constexpr float kMaxStickSensitivity = 2.0f;
 static float g_stickDeadzone = 0.08f;
 static float g_stickSensitivity = 1.7f;
 
 void SetStickDeadzone(float deadzone) {
-    g_stickDeadzone = std::clamp(deadzone, 0.0f, 0.5f);
+    if (std::isfinite(deadzone)) {
+        g_stickDeadzone = std::clamp(deadzone, kMinStickDeadzone, kMaxStickDeadzone);
+    }
 }
 
 void SetStickSensitivity(float sensitivity) {
-    g_stickSensitivity = std::clamp(sensitivity, 0.1f, 5.0f);
+    if (std::isfinite(sensitivity)) {
+        g_stickSensitivity = std::clamp(sensitivity, kMinStickSensitivity, kMaxStickSensitivity);
+    }
 }
 
 float GetStickDeadzone() {
