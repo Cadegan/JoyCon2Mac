@@ -83,6 +83,25 @@ uint32_t ExtractButtonState(const std::vector<uint8_t>& buffer, JoyConSide side)
          |  uint32_t(buffer[btnOffset + 2]);
 }
 
+static float g_stickDeadzone = 0.08f;
+static float g_stickSensitivity = 1.7f;
+
+void SetStickDeadzone(float deadzone) {
+    g_stickDeadzone = std::clamp(deadzone, 0.0f, 0.5f);
+}
+
+void SetStickSensitivity(float sensitivity) {
+    g_stickSensitivity = std::clamp(sensitivity, 0.1f, 5.0f);
+}
+
+float GetStickDeadzone() {
+    return g_stickDeadzone;
+}
+
+float GetStickSensitivity() {
+    return g_stickSensitivity;
+}
+
 StickData DecodeJoystick(const std::vector<uint8_t>& buffer, JoyConSide side, JoyConOrientation orientation) {
     if (buffer.size() < 16) {
         return { 0, 0, 0, 0 };
@@ -117,13 +136,14 @@ StickData DecodeJoystick(const std::vector<uint8_t>& buffer, JoyConSide side, Jo
         y = isLeft ? tx : -tx;
     }
 
-    const float deadzone = 0.08f;
+    const float deadzone = g_stickDeadzone;
     if (std::abs(x) < deadzone && std::abs(y) < deadzone) {
         return { 0, 0, 0, 0 };
     }
 
-    x = std::clamp(x * 1.7f, -1.0f, 1.0f);
-    y = std::clamp(y * 1.7f, -1.0f, 1.0f);
+    const float sensitivity = g_stickSensitivity;
+    x = std::clamp(x * sensitivity, -1.0f, 1.0f);
+    y = std::clamp(y * sensitivity, -1.0f, 1.0f);
 
     int16_t outX = static_cast<int16_t>(x * 32767);
     int16_t outY = static_cast<int16_t>(-y * 32767);

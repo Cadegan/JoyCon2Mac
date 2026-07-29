@@ -71,6 +71,12 @@ struct BatteryData {
 uint32_t ExtractButtonState(const std::vector<uint8_t>& buffer);
 uint32_t ExtractButtonState(const std::vector<uint8_t>& buffer, JoyConSide side);
 
+// Joystick configuration
+void SetStickDeadzone(float deadzone);
+void SetStickSensitivity(float sensitivity);
+float GetStickDeadzone();
+float GetStickSensitivity();
+
 // Joystick decoding
 StickData DecodeJoystick(const std::vector<uint8_t>& buffer, JoyConSide side, JoyConOrientation orientation);
 

@@ -578,6 +578,18 @@ static void applyControlCommand(NSDictionary *command) {
         g_railBindingRightSR = sanitizedRailTarget(bindings[@"rightSR"]);
 
         emitDaemonEvent("railBindings", "applied=1");
+    } else if ([cmd isEqualToString:@"setDeadzone"]) {
+        NSNumber *value = command[@"value"];
+        if ([value isKindOfClass:[NSNumber class]]) {
+            SetStickDeadzone(value.floatValue);
+            emitDaemonEvent("deadzone", [[NSString stringWithFormat:@"applied=%.2f", value.floatValue] UTF8String]);
+        }
+    } else if ([cmd isEqualToString:@"setStickSensitivity"]) {
+        NSNumber *value = command[@"value"];
+        if ([value isKindOfClass:[NSNumber class]]) {
+            SetStickSensitivity(value.floatValue);
+            emitDaemonEvent("stickSensitivity", [[NSString stringWithFormat:@"applied=%.2f", value.floatValue] UTF8String]);
+        }
     } else {
         emitDaemonEvent("controlUnknown",
                         [[NSString stringWithFormat:@"unknown cmd=%@", cmd] UTF8String]);
@@ -631,12 +643,12 @@ static void pollControlFile() {
 static void startControlFilePolling(NSString *path) {
     if (!path) return;
     g_controlFilePath = [path copy];
-    // Ensure the file exists so the GUI's append-open doesn't race us, and
-    // so we know where the read cursor is.
+    // Ensure the file exists with restricted permissions (0600) so the GUI's append-open doesn't race us
     if (![[NSFileManager defaultManager] fileExistsAtPath:g_controlFilePath]) {
+        NSDictionary *fileAttrs = @{ NSFilePosixPermissions: @(0600) };
         [[NSFileManager defaultManager] createFileAtPath:g_controlFilePath
                                                 contents:nil
-                                              attributes:nil];
+                                              attributes:fileAttrs];
     }
     NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:g_controlFilePath error:nil];
     g_controlFileOffset = [attrs[NSFileSize] unsignedLongLongValue];
@@ -807,41 +819,70 @@ static void printJSONState(const std::vector<uint8_t>& buffer, JoyConSide side, 
     int mouseSource = g_mouseEmitter ? (int)g_mouseEmitter.source : 0;
     const char *mouseActive = g_mouseEmitter && g_mouseEmitter.lastActiveSide == JoyConSide::Left ? "left" : "right";
 
-    std::ostringstream out;
-    out << "{"
-        << "\"event\":\"state\","
-        << "\"side\":\"" << sideName << "\","
-        << "\"packetCount\":" << g_state.packetCount << ","
-        << "\"packetSize\":" << buffer.size() << ","
-        << "\"buttons\":" << sideButtons << ","
-        << "\"leftButtons\":" << g_state.leftButtons << ","
-        << "\"rightButtons\":" << g_state.rightButtons << ","
-        << "\"stickX\":" << sideStick.x << ","
-        << "\"stickY\":" << sideStick.y << ","
-        << "\"leftStickX\":" << g_state.leftStick.x << ","
-        << "\"leftStickY\":" << g_state.leftStick.y << ","
-        << "\"rightStickX\":" << g_state.rightStick.x << ","
-        << "\"rightStickY\":" << g_state.rightStick.y << ","
-        << "\"gyroX\":" << sideMotion.gyroX << ","
-        << "\"gyroY\":" << sideMotion.gyroY << ","
-        << "\"gyroZ\":" << sideMotion.gyroZ << ","
-        << "\"accelX\":" << sideMotion.accelX << ","
-        << "\"accelY\":" << sideMotion.accelY << ","
-        << "\"accelZ\":" << sideMotion.accelZ << ","
-        << "\"mouseX\":" << sideMouse.deltaX << ","
-        << "\"mouseY\":" << sideMouse.deltaY << ","
-        << "\"mouseDistance\":" << sideMouse.distance << ","
-        << "\"batteryVoltage\":" << g_state.battery.voltage << ","
-        << "\"batteryCurrent\":" << g_state.battery.current << ","
-        << "\"batteryTemperature\":" << g_state.battery.temperature << ","
-        << "\"batteryPercentage\":" << g_state.battery.percentage << ","
-        << "\"triggerL\":" << (int)g_state.triggerL << ","
-        << "\"triggerR\":" << (int)g_state.triggerR << ","
-        << "\"mouseMode\":" << mouseMode << ","
-        << "\"mouseSource\":" << mouseSource << ","
-        << "\"mouseActiveSide\":\"" << mouseActive << "\""
-        << "}";
-    emitJSONLine(out.str());
+    char jsonBuf[1024];
+    snprintf(jsonBuf, sizeof(jsonBuf),
+        "{\"event\":\"state\","
+        "\"side\":\"%s\","
+        "\"packetCount\":%u,"
+        "\"packetSize\":%zu,"
+        "\"buttons\":%u,"
+        "\"leftButtons\":%u,"
+        "\"rightButtons\":%u,"
+        "\"stickX\":%d,"
+        "\"stickY\":%d,"
+        "\"leftStickX\":%d,"
+        "\"leftStickY\":%d,"
+        "\"rightStickX\":%d,"
+        "\"rightStickY\":%d,"
+        "\"gyroX\":%.2f,"
+        "\"gyroY\":%.2f,"
+        "\"gyroZ\":%.2f,"
+        "\"accelX\":%.2f,"
+        "\"accelY\":%.2f,"
+        "\"accelZ\":%.2f,"
+        "\"mouseX\":%d,"
+        "\"mouseY\":%d,"
+        "\"mouseDistance\":%u,"
+        "\"batteryVoltage\":%.2f,"
+        "\"batteryCurrent\":%.2f,"
+        "\"batteryTemperature\":%.2f,"
+        "\"batteryPercentage\":%.2f,"
+        "\"triggerL\":%d,"
+        "\"triggerR\":%d,"
+        "\"mouseMode\":%d,"
+        "\"mouseSource\":%d,"
+        "\"mouseActiveSide\":\"%s\"}",
+        sideName,
+        g_state.packetCount,
+        buffer.size(),
+        sideButtons,
+        g_state.leftButtons,
+        g_state.rightButtons,
+        sideStick.x,
+        sideStick.y,
+        g_state.leftStick.x,
+        g_state.leftStick.y,
+        g_state.rightStick.x,
+        g_state.rightStick.y,
+        sideMotion.gyroX,
+        sideMotion.gyroY,
+        sideMotion.gyroZ,
+        sideMotion.accelX,
+        sideMotion.accelY,
+        sideMotion.accelZ,
+        sideMouse.deltaX,
+        sideMouse.deltaY,
+        (unsigned)sideMouse.distance,
+        g_state.battery.voltage,
+        g_state.battery.current,
+        g_state.battery.temperature,
+        g_state.battery.percentage,
+        (int)g_state.triggerL,
+        (int)g_state.triggerR,
+        mouseMode,
+        mouseSource,
+        mouseActive);
+    emitJSONLine(jsonBuf);
 }
 
 void onJoyConData(const std::vector<uint8_t>& buffer, JoyConSide side) {

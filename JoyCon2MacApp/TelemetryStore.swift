@@ -31,11 +31,14 @@ class TelemetryStore: ObservableObject {
 
     func append(_ line: String) {
         guard !line.isEmpty else { return }
-        pendingLines.append(line)
-        if pendingLines.count > maxStoredLines * 2 {
-            pendingLines.removeFirst(pendingLines.count - maxStoredLines)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.pendingLines.append(line)
+            if self.pendingLines.count > self.maxStoredLines * 2 {
+                self.pendingLines.removeFirst(self.pendingLines.count - self.maxStoredLines)
+            }
+            self.scheduleFlush()
         }
-        scheduleFlush()
     }
 
     func updateDriverStatus(_ status: String) {

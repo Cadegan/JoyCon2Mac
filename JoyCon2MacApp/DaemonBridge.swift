@@ -133,11 +133,9 @@ enum NFCDecoder {
 
     private static func decodeNDEFContainers(in data: Data) -> [NFCDecodedRecord] {
         let bytes = Array(data)
-        var records: [NFCDecodedRecord] = []
-
-        for offset in bytes.indices {
-            records.append(contentsOf: decodeTLV(from: bytes, offset: offset))
-            records.append(contentsOf: decodeNDEFRecords(Array(bytes[offset...])))
+        var records = decodeTLV(from: bytes, offset: 0)
+        if records.isEmpty {
+            records.append(contentsOf: decodeNDEFRecords(bytes))
         }
         return records
     }
@@ -541,7 +539,7 @@ class DaemonBridge: ObservableObject {
             outputPipe = pipe
             isDaemonRunning = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.sendStoredRailBindings()
+                self?.sendStoredSettings()
             }
         } catch {
             TelemetryStore.shared.append("Failed to start daemon: \(error)")
@@ -567,7 +565,7 @@ class DaemonBridge: ObservableObject {
                 for app in existing {
                     Darwin.kill(app.processIdentifier, SIGKILL)
                 }
-                Thread.sleep(forTimeInterval: 0.05)
+                usleep(10000)
                 attempts += 1
             }
 
@@ -841,7 +839,7 @@ class DaemonBridge: ObservableObject {
                 else if status == "findJoyCon" { self?.applyFindStatus(detail) }
                 else if status == "controlFile" {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        self?.sendStoredRailBindings()
+                        self?.sendStoredSettings()
                     }
                 }
             }
@@ -1234,11 +1232,19 @@ class DaemonBridge: ObservableObject {
         ])
     }
 
+    func setDeadzone(_ value: Double) {
+        sendControlCommand(["cmd": "setDeadzone", "value": value])
+    }
+
+    func setStickSensitivity(_ value: Double) {
+        sendControlCommand(["cmd": "setStickSensitivity", "value": value])
+    }
+
     func setRailBindings(_ bindings: [String: String]) {
         sendControlCommand(["cmd": "setRailBindings", "bindings": bindings])
     }
 
-    private func sendStoredRailBindings() {
+    private func sendStoredSettings() {
         let defaults = UserDefaults.standard
         setRailBindings([
             "leftSL": defaults.string(forKey: "railBinding.leftSL") ?? "none",
@@ -1246,6 +1252,10 @@ class DaemonBridge: ObservableObject {
             "rightSL": defaults.string(forKey: "railBinding.rightSL") ?? "none",
             "rightSR": defaults.string(forKey: "railBinding.rightSR") ?? "none"
         ])
+        let deadzone = defaults.object(forKey: "deadzone") as? Double ?? 0.08
+        setDeadzone(deadzone)
+        let sensitivity = defaults.object(forKey: "stickSensitivity") as? Double ?? 1.0
+        setStickSensitivity(sensitivity)
     }
 
     private func applyFindStatus(_ detail: String) {

@@ -109,7 +109,17 @@ struct SettingsView: View {
             Section("Controller") {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Deadzone: \(deadzone, specifier: "%.2f")")
-                    Slider(value: $deadzone, in: 0.0...0.3, step: 0.01)
+                    Slider(
+                        value: Binding(
+                            get: { deadzone },
+                            set: { newValue in
+                                deadzone = newValue
+                                daemonBridge.setDeadzone(newValue)
+                            }
+                        ),
+                        in: 0.0...0.3,
+                        step: 0.01
+                    )
                     Text("Ignore small stick movements below this threshold")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -117,14 +127,24 @@ struct SettingsView: View {
                 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Stick Sensitivity: \(stickSensitivity, specifier: "%.2f")x")
-                    Slider(value: $stickSensitivity, in: 0.5...2.0, step: 0.1)
+                    Slider(
+                        value: Binding(
+                            get: { stickSensitivity },
+                            set: { newValue in
+                                stickSensitivity = newValue
+                                daemonBridge.setStickSensitivity(newValue)
+                            }
+                        ),
+                        in: 0.5...2.0,
+                        step: 0.1
+                    )
                     Text("Adjust analog stick response curve")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
                 
                 Button("Calibrate Sticks") {
-                    // Open calibration wizard
+                    showCalibrationAlert()
                 }
             }
             
@@ -172,20 +192,20 @@ struct SettingsView: View {
                 HStack {
                     Text("Version:")
                     Spacer()
-                    Text("1.0.0")
+                    Text(appVersion)
                         .foregroundColor(.secondary)
                 }
                 
                 HStack {
                     Text("Build:")
                     Spacer()
-                    Text("2026.05.05")
+                    Text(appBuild)
                         .foregroundColor(.secondary)
                 }
                 
-                Link("GitHub Repository", destination: URL(string: "https://github.com/OZORDI/JoyCon2Mac")!)
+                Link("GitHub Repository", destination: URL(string: "https://github.com/Cadegan/JoyCon2Mac")!)
                 
-                Link("Report Issue", destination: URL(string: "https://github.com/OZORDI/JoyCon2Mac/issues/new")!)
+                Link("Report Issue", destination: URL(string: "https://github.com/Cadegan/JoyCon2Mac/issues/new")!)
             }
         }
         .formStyle(.grouped)
@@ -230,6 +250,23 @@ struct SettingsView: View {
         }
     }
     
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    }
+
+    private var appBuild: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1.0"
+    }
+
+    func showCalibrationAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Automatic Stick Calibration"
+        alert.informativeText = "JoyCon2Mac continuously calibrates stick centers automatically whenever your sticks remain steady in their neutral position.\n\nLeave both Joy-Cons untouched on a flat surface for 1-2 seconds if you ever experience stick drift."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
     func importConfig() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
@@ -245,8 +282,12 @@ struct SettingsView: View {
                     sdlOnlyMode = config["sdlOnlyMode"] as? Bool ?? false
                     daemonBridge.setSDLOnlyMode(sdlOnlyMode)
                     logLevel = config["logLevel"] as? String ?? "Info"
-                    deadzone = config["deadzone"] as? Double ?? 0.08
-                    stickSensitivity = config["stickSensitivity"] as? Double ?? 1.0
+                    let rawDeadzone = config["deadzone"] as? Double ?? 0.08
+                    deadzone = max(0.0, min(0.3, rawDeadzone))
+                    daemonBridge.setDeadzone(deadzone)
+                    let rawSensitivity = config["stickSensitivity"] as? Double ?? 1.0
+                    stickSensitivity = max(0.5, min(2.0, rawSensitivity))
+                    daemonBridge.setStickSensitivity(stickSensitivity)
                 }
             }
         }
@@ -282,7 +323,9 @@ struct SettingsView: View {
             daemonBridge.setSDLOnlyMode(false)
             logLevel = "Info"
             deadzone = 0.08
+            daemonBridge.setDeadzone(0.08)
             stickSensitivity = 1.0
+            daemonBridge.setStickSensitivity(1.0)
         }
     }
 }
