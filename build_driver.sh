@@ -2,6 +2,13 @@
 
 set -e
 
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT_DIR"
+if [ -z "${DEVELOPER_DIR:-}" ] &&
+   [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
+    export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+fi
+
 echo "╔════════════════════════════════════════════════════════╗"
 echo "║         Building DriverKit Extension via CMake         ║"
 echo "╚════════════════════════════════════════════════════════╝"
@@ -243,10 +250,10 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 echo "Location: $DEXT_DIR"
 echo ""
-echo "To install (with SIP disabled):"
-echo "  sudo cp -r $BUILD_DIR/Release/VirtualJoyConDriver.dext /Library/SystemExtensions/"
-echo "  sudo kmutil load -p /Library/SystemExtensions/VirtualJoyConDriver.dext"
+echo "The extension is embedded and activated through JoyCon2Mac.app."
+echo "Expected embedded path:"
+echo "  JoyCon2Mac.app/Contents/Library/SystemExtensions/local.joycon2mac.driver.dext"
 echo ""
 echo "To verify:"
-echo "  sudo kmutil showloaded | grep VirtualJoyCon"
+echo "  systemextensionsctl list | grep local.joycon2mac.driver"
 echo ""

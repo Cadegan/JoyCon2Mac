@@ -77,6 +77,15 @@ void SetStickSensitivity(float sensitivity);
 float GetStickDeadzone();
 float GetStickSensitivity();
 
+// Stick calibration. Calibration starts automatically on daemon launch and
+// can be restarted explicitly from the GUI. A completed center is preserved
+// if an explicit recalibration is cancelled or expires.
+void BeginStickCalibration();
+void CancelStickCalibration();
+bool IsStickCalibrationComplete(JoyConSide side);
+bool IsStickCalibrationInProgress(JoyConSide side);
+int GetStickCalibrationSampleCount(JoyConSide side);
+
 // Joystick decoding
 StickData DecodeJoystick(const std::vector<uint8_t>& buffer, JoyConSide side, JoyConOrientation orientation);
 

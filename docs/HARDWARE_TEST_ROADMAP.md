@@ -21,7 +21,25 @@ Les améliorations suivantes sont intégrées au commit `f90d96d`, mais restent 
 - vrai réglage macOS « Launch at Login » ;
 - effacement fiable de la vue des journaux.
 
-Les deux sujets bloquants avant un test matériel fiable sont la signature imbriquée du DriverKit et la calibration automatique des sticks.
+Depuis la création de cette feuille de route, les corrections logicielles de signature
+imbriquée, de calibration, de réglages et de pré-vol ont été implémentées. La validation
+réelle du bundle produit a également passé le pré-vol local. L'activation effective de
+l'extension et les entrées restent à confirmer avec le matériel.
+
+### Avancement au 2026-07-30
+
+- [x] CMake installé et tests natifs exécutables.
+- [x] Ordre de signature interne vers externe implémenté, sans `codesign --deep` à la signature.
+- [x] Pré-vol du bundle ajouté à `build_all.sh`.
+- [x] Calibration déterministe et commande manuelle reliées à l'interface.
+- [x] Réglages sans effet retirés de l'interface et de l'export.
+- [x] Licence Xcode acceptée et SDK DriverKit disponible.
+- [x] Build DriverKit complet, signature et entitlements vérifiés sur le bundle produit.
+- [ ] Matrice de test matériel exécutée.
+
+Dernière validation logicielle : `./build_all.sh` termine avec
+`Ready for hardware test`, et `ctest --test-dir build --output-on-failure`
+valide tous les tests de calibration.
 
 ## 2. Ordre recommandé
 
@@ -41,32 +59,34 @@ Les deux sujets bloquants avant un test matériel fiable sont la signature imbri
 ### État observé le 2026-07-30
 
 - machine : Apple Silicon, macOS 26.5.1 ;
-- `cmake` absent du `PATH` ;
-- licence Xcode non acceptée ;
+- `cmake` 4.4.1 installé et présent dans le `PATH` ;
+- licence Xcode acceptée ;
+- SDK DriverKit 25.5 disponible ;
 - le typage et la liaison Swift fonctionnent en appelant directement le compilateur Xcode ;
-- le daemon C++/Objective-C++ compile et se lie.
+- le daemon C++/Objective-C++ compile et se lie ;
+- les tests unitaires de calibration passent.
 
 ### Actions
 
-- [ ] Accepter la licence Xcode :
+- [x] Accepter la licence Xcode :
 
   ```bash
   sudo xcodebuild -license accept
   ```
 
-- [ ] Installer CMake et confirmer sa disponibilité :
+- [x] Installer CMake et confirmer sa disponibilité :
 
   ```bash
   cmake --version
   ```
 
-- [ ] Vérifier le SDK DriverKit :
+- [x] Vérifier le SDK DriverKit :
 
   ```bash
   xcrun --sdk driverkit --show-sdk-path
   ```
 
-- [ ] Vérifier que l'identité ou la signature ad hoc prévue pour le test est explicitement choisie.
+- [x] Vérifier que l'identité ou la signature ad hoc prévue pour le test est explicitement choisie.
 - [ ] Utiliser uniquement un Mac de développement isolé si SIP/AMFI doivent être désactivés.
 - [ ] Documenter la procédure de restauration de SIP/AMFI après le test.
 
@@ -99,23 +119,23 @@ Une signature récursive forcée peut re-signer les composants imbriqués avec l
 
 ### Implémentation
 
-- [ ] Signer les composants de l'intérieur vers l'extérieur :
+- [x] Signer les composants de l'intérieur vers l'extérieur :
 
   1. binaire et bundle `local.joycon2mac.driver.dext` ;
   2. `JoyCon2MacDaemon.app` ;
   3. `JoyCon2Mac.app`.
 
-- [ ] Ne pas utiliser `--deep` pour signer l'app.
-- [ ] Conserver `--deep` uniquement pour une vérification finale, si nécessaire.
-- [ ] Après copie du `.dext`, re-signer uniquement le bundle extérieur de l'app.
-- [ ] Faire échouer `build_all.sh` si :
+- [x] Ne pas utiliser `--deep` pour signer l'app.
+- [x] Conserver `--deep` uniquement pour une vérification finale, si nécessaire.
+- [x] Après copie du `.dext`, re-signer uniquement le bundle extérieur de l'app.
+- [x] Faire échouer `build_all.sh` si :
 
   - le build du driver échoue et aucun `.dext` précompilé n'est disponible ;
   - le `.dext` n'existe pas dans `Contents/Library/SystemExtensions/` ;
   - la signature d'un composant est invalide ;
   - les entitlements DriverKit attendus sont absents.
 
-- [ ] Corriger les instructions finales de `build_driver.sh`, qui mentionnent encore l'ancien nom `VirtualJoyConDriver.dext`.
+- [x] Corriger les instructions finales de `build_driver.sh`, qui mentionnaient encore l'ancien nom `VirtualJoyConDriver.dext`.
 
 ### Vérifications
 
@@ -178,33 +198,35 @@ Le décodage est aussi appelé plusieurs fois par paquet dans certains chemins, 
 
 ### Implémentation
 
-- [ ] Déplacer les états de calibration hors des variables `static` locales de `DecodeJoystick`.
-- [ ] Ajouter une API explicite, par exemple :
+- [x] Déplacer les états de calibration hors des variables `static` locales de `DecodeJoystick`.
+- [x] Ajouter une API explicite :
 
   ```cpp
-  void ResetStickCalibration();
+  void BeginStickCalibration();
+  void CancelStickCalibration();
   bool IsStickCalibrationComplete(JoyConSide side);
+  int GetStickCalibrationSampleCount(JoyConSide side);
   ```
 
-- [ ] Ajouter une commande IPC `calibrateSticks`.
-- [ ] Relier le bouton SwiftUI à cette commande.
-- [ ] Émettre des événements daemon de progression.
-- [ ] Utiliser une fenêtre initiale stricte autour du centre nominal `2048`.
-- [ ] Commencer avec une tolérance expérimentale d'environ ±160 valeurs brutes, à ajuster à partir des traces matérielles.
-- [ ] Exiger au moins 30 échantillons stables avec une variation inter-échantillons maximale de 4.
-- [ ] Compter au plus un échantillon de calibration par paquet physique.
-- [ ] Après validation, ne plus recentrer automatiquement hors de la deadzone autour du centre établi.
-- [ ] Ajouter un délai maximal et conserver le centre précédent si la calibration expire.
+- [x] Ajouter une commande IPC `calibrateSticks`.
+- [x] Relier le bouton SwiftUI à cette commande.
+- [x] Émettre des événements daemon de progression.
+- [x] Utiliser une fenêtre initiale stricte autour du centre nominal `2048`.
+- [x] Commencer avec une tolérance expérimentale d'environ ±160 valeurs brutes, à ajuster à partir des traces matérielles.
+- [x] Exiger au moins 30 échantillons stables avec une variation inter-échantillons maximale de 4.
+- [x] Compter au plus un échantillon de calibration par paquet physique.
+- [x] Après validation, ne plus recentrer automatiquement hors de la deadzone autour du centre établi.
+- [x] Ajouter un délai maximal et conserver le centre précédent si la calibration expire.
 
 ### Cas de validation
 
-- [ ] Démarrer avec les deux sticks relâchés : les deux côtés se calibrent.
-- [ ] Démarrer avec un stick maintenu à 20 % : il ne devient pas le centre.
-- [ ] Maintenir un stick immobile pendant dix secondes après calibration : le centre ne bouge pas.
-- [ ] Relâcher le stick : la valeur revient à zéro sans mouvement inverse.
+- [x] Démarrer avec les deux sticks relâchés : les deux côtés se calibrent (test unitaire).
+- [x] Démarrer avec un stick maintenu à 20 % : il ne devient pas le centre (test unitaire).
+- [x] Maintenir un stick immobile après calibration : le centre ne bouge pas (test unitaire).
+- [x] Relâcher le stick : la valeur revient à zéro sans mouvement inverse (test unitaire).
 - [ ] Déplacer chaque stick jusqu'aux quatre extrêmes : la plage HID reste symétrique et atteint la valeur attendue.
 - [ ] Modifier deadzone et sensibilité : le changement est visible sans redémarrage.
-- [ ] Relancer une calibration manuelle : la progression est visible et les deux côtés sont recalculés.
+- [ ] Relancer une calibration manuelle : la progression est visible et les deux côtés sont recalculés sur matériel.
 
 ### Critère d'acceptation
 
@@ -227,9 +249,9 @@ Une session de cinq minutes avec mouvements, maintiens et relâchements répét�
 
 Pour limiter les risques avant le test matériel :
 
-- [ ] masquer ou désactiver les contrôles sans effet ;
-- [ ] afficher « Not implemented yet » lorsqu'un contrôle doit rester visible ;
-- [ ] ne pas exporter un réglage qui n'a aucun comportement.
+- [x] masquer ou désactiver les contrôles sans effet ;
+- [x] retirer entièrement les contrôles qui ne doivent pas rester visibles ;
+- [x] ne pas exporter un réglage qui n'a aucun comportement.
 
 ### Implémentation ultérieure
 
@@ -254,15 +276,15 @@ Chaque contrôle visible produit un effet observable ou indique clairement qu'il
 
 Ajouter à `build_all.sh` une étape finale qui vérifie :
 
-- [ ] présence de `JoyCon2Mac.app` ;
-- [ ] présence et exécution du helper daemon ;
-- [ ] présence du `.dext` sous son nom exact ;
-- [ ] identifiants de bundle attendus ;
-- [ ] versions non vides ;
-- [ ] signatures valides ;
-- [ ] entitlements distincts app/driver ;
-- [ ] absence de l'ancien `VirtualJoyConDriver.dext` ;
-- [ ] présence du framework `ServiceManagement` dans la compilation Swift.
+- [x] présence de `JoyCon2Mac.app` ;
+- [x] présence et exécution du helper daemon ;
+- [x] présence du `.dext` sous son nom exact ;
+- [x] identifiants de bundle attendus ;
+- [x] versions non vides ;
+- [x] signatures valides ;
+- [x] entitlements distincts app/driver ;
+- [x] absence de l'ancien `VirtualJoyConDriver.dext` ;
+- [x] présence du framework `ServiceManagement` dans la compilation Swift.
 
 Le script doit afficher un résumé final explicite :
 

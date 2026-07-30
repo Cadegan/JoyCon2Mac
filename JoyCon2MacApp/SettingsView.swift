@@ -4,10 +4,7 @@ import ServiceManagement
 struct SettingsView: View {
     @EnvironmentObject var daemonBridge: DaemonBridge
     @AppStorage("launchAtLogin") private var launchAtLogin = false
-    @AppStorage("autoReconnect") private var autoReconnect = true
-    @AppStorage("showNotifications") private var showNotifications = true
     @AppStorage("sdlOnlyMode") private var sdlOnlyMode = false
-    @AppStorage("logLevel") private var logLevel = "Info"
     @AppStorage("deadzone") private var deadzone: Double = StickTuning.defaultDeadzone
     @AppStorage("stickSensitivity") private var stickSensitivity: Double = StickTuning.defaultSensitivity
     @State private var launchAtLoginMessage: String?
@@ -37,11 +34,9 @@ struct SettingsView: View {
                     }
                 }
                 
-                Toggle("Auto-Reconnect", isOn: $autoReconnect)
-                    .help("Automatically reconnect to paired controllers")
-                
-                Toggle("Show Notifications", isOn: $showNotifications)
-                    .help("Show notifications when controllers connect/disconnect")
+                Text("Joy-Con reconnection is managed automatically while the daemon is running.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
             
             Section("Daemon") {
@@ -53,13 +48,6 @@ struct SettingsView: View {
                         .frame(width: 10, height: 10)
                     Text(daemonBridge.isDaemonRunning ? "Running" : "Stopped")
                         .foregroundColor(.secondary)
-                }
-                
-                Picker("Log Level", selection: $logLevel) {
-                    Text("Error").tag("Error")
-                    Text("Warning").tag("Warning")
-                    Text("Info").tag("Info")
-                    Text("Debug").tag("Debug")
                 }
                 
                 HStack {
@@ -164,9 +152,14 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                 }
                 
-                Button("Calibrate Sticks") {
-                    showCalibrationAlert()
+                Button(daemonBridge.isCalibratingSticks ? "Calibrating..." : "Calibrate Sticks") {
+                    requestStickCalibration()
                 }
+                .disabled(daemonBridge.isCalibratingSticks || !daemonBridge.isDaemonRunning)
+
+                Text(daemonBridge.stickCalibrationStatus)
+                    .font(.caption)
+                    .foregroundColor(daemonBridge.isCalibratingSticks ? .orange : .secondary)
             }
             
             Section("Data") {
@@ -186,17 +179,6 @@ struct SettingsView: View {
                     buttonTitle: "Import",
                     role: nil,
                     action: importConfig
-                )
-
-                Divider()
-
-                SettingsActionRow(
-                    icon: "gamecontroller",
-                    title: "Paired Controllers",
-                    subtitle: "Remove saved Joy-Con pairing records.",
-                    buttonTitle: "Clear",
-                    role: .destructive,
-                    action: clearPairedControllers
                 )
 
                 SettingsActionRow(
@@ -259,10 +241,7 @@ struct SettingsView: View {
                 // Export configuration
                 let config: [String: Any] = [
                     "launchAtLogin": launchAtLogin,
-                    "autoReconnect": autoReconnect,
-                    "showNotifications": showNotifications,
                     "sdlOnlyMode": sdlOnlyMode,
-                    "logLevel": logLevel,
                     "deadzone": deadzone,
                     "stickSensitivity": stickSensitivity
                 ]
@@ -323,13 +302,16 @@ struct SettingsView: View {
         }
     }
 
-    func showCalibrationAlert() {
+    func requestStickCalibration() {
         let alert = NSAlert()
-        alert.messageText = "Automatic Stick Calibration"
-        alert.informativeText = "JoyCon2Mac continuously calibrates stick centers automatically whenever your sticks remain steady in their neutral position.\n\nLeave both Joy-Cons untouched on a flat surface for 1-2 seconds if you ever experience stick drift."
+        alert.messageText = "Calibrate Both Sticks?"
+        alert.informativeText = "Place both Joy-Cons on a stable surface and leave both sticks completely untouched. Calibration takes less than five seconds."
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+        alert.addButton(withTitle: "Calibrate")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn {
+            daemonBridge.calibrateSticks()
+        }
     }
 
     func importConfig() {
@@ -342,11 +324,8 @@ struct SettingsView: View {
                 if let data = try? Data(contentsOf: url),
                    let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     updateLaunchAtLogin(config["launchAtLogin"] as? Bool ?? false)
-                    autoReconnect = config["autoReconnect"] as? Bool ?? true
-                    showNotifications = config["showNotifications"] as? Bool ?? true
                     sdlOnlyMode = config["sdlOnlyMode"] as? Bool ?? false
                     daemonBridge.setSDLOnlyMode(sdlOnlyMode)
-                    logLevel = config["logLevel"] as? String ?? "Info"
                     let rawDeadzone = config["deadzone"] as? Double ?? StickTuning.defaultDeadzone
                     deadzone = StickTuning.deadzone(rawDeadzone)
                     daemonBridge.setDeadzone(deadzone)
@@ -355,20 +334,6 @@ struct SettingsView: View {
                     daemonBridge.setStickSensitivity(stickSensitivity)
                 }
             }
-        }
-    }
-    
-    func clearPairedControllers() {
-        let alert = NSAlert()
-        alert.messageText = "Clear Paired Controllers?"
-        alert.informativeText = "This will remove all paired controllers. You'll need to pair them again."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Clear")
-        alert.addButton(withTitle: "Cancel")
-        
-        if alert.runModal() == .alertFirstButtonReturn {
-            // Clear paired controllers from UserDefaults
-            UserDefaults.standard.removeObject(forKey: "PairedControllers")
         }
     }
     
@@ -382,11 +347,8 @@ struct SettingsView: View {
         
         if alert.runModal() == .alertFirstButtonReturn {
             updateLaunchAtLogin(false)
-            autoReconnect = true
-            showNotifications = true
             sdlOnlyMode = false
             daemonBridge.setSDLOnlyMode(false)
-            logLevel = "Info"
             deadzone = StickTuning.defaultDeadzone
             daemonBridge.setDeadzone(StickTuning.defaultDeadzone)
             stickSensitivity = StickTuning.defaultSensitivity

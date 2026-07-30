@@ -422,6 +422,8 @@ class DaemonBridge: ObservableObject {
     @Published var stateRevision: UInt64 = 0
     @Published var findingLeftJoyCon = false
     @Published var findingRightJoyCon = false
+    @Published var isCalibratingSticks = false
+    @Published var stickCalibrationStatus = "Sticks calibrate automatically when first connected."
 
     // Background queue that owns parsing, file tailing, and throttling.
     // Nothing on this queue touches @Published state directly.
@@ -912,6 +914,9 @@ class DaemonBridge: ObservableObject {
                 if status == "started" { self?.isDaemonRunning = true }
                 else if status == "exiting" { self?.isDaemonRunning = false }
                 else if status == "findJoyCon" { self?.applyFindStatus(detail) }
+                else if status == "stickCalibration" {
+                    self?.applyStickCalibrationStatus(detail)
+                }
                 else if status == "controlFile" {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                         self?.sendStoredSettings()
@@ -1315,6 +1320,16 @@ class DaemonBridge: ObservableObject {
         sendControlCommand(["cmd": "setStickSensitivity", "value": StickTuning.sensitivity(value)])
     }
 
+    func calibrateSticks() {
+        guard isDaemonRunning else {
+            stickCalibrationStatus = "Start the daemon before calibrating the sticks."
+            return
+        }
+        isCalibratingSticks = true
+        stickCalibrationStatus = "Leave both sticks untouched while calibration starts..."
+        sendControlCommand(["cmd": "calibrateSticks"])
+    }
+
     func setRailBindings(_ bindings: [String: String]) {
         sendControlCommand(["cmd": "setRailBindings", "bindings": bindings])
     }
@@ -1350,6 +1365,50 @@ class DaemonBridge: ObservableObject {
         }
         if let right = pairs["right"] {
             findingRightJoyCon = right == "1"
+        }
+    }
+
+    private func applyStickCalibrationStatus(_ detail: String) {
+        let pairs = detail.split(separator: " ").reduce(into: [String: String]()) { result, token in
+            let parts = token.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2 else { return }
+            result[String(parts[0])] = String(parts[1])
+        }
+
+        let state = pairs["state"] ?? "unknown"
+        let leftDone = pairs["left"] == "1"
+        let rightDone = pairs["right"] == "1"
+        let leftSamples = Int(pairs["leftSamples"] ?? "0") ?? 0
+        let rightSamples = Int(pairs["rightSamples"] ?? "0") ?? 0
+
+        switch state {
+        case "waiting":
+            isCalibratingSticks = true
+            stickCalibrationStatus = "Leave both sticks untouched in their neutral position."
+        case "progress":
+            isCalibratingSticks = true
+            let leftText = leftDone ? "done" : "\(leftSamples)/30"
+            let rightText = rightDone ? "done" : "\(rightSamples)/30"
+            stickCalibrationStatus = "Calibrating — Left: \(leftText), Right: \(rightText)"
+        case "complete":
+            isCalibratingSticks = false
+            stickCalibrationStatus = "Stick calibration complete."
+        case "expired":
+            isCalibratingSticks = false
+            let completedSides: String
+            if leftDone && rightDone {
+                completedSides = "Both saved centers were retained."
+            } else if leftDone {
+                completedSides = "Left completed; the previous right center was retained."
+            } else if rightDone {
+                completedSides = "Right completed; the previous left center was retained."
+            } else {
+                completedSides = "Previous centers were retained."
+            }
+            stickCalibrationStatus = "Calibration timed out. \(completedSides)"
+        default:
+            isCalibratingSticks = false
+            stickCalibrationStatus = "Unknown calibration status."
         }
     }
 

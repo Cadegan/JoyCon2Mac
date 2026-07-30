@@ -87,6 +87,10 @@ static std::string g_railBindingLeftSL = "none";
 static std::string g_railBindingLeftSR = "none";
 static std::string g_railBindingRightSL = "none";
 static std::string g_railBindingRightSR = "none";
+static bool g_stickCalibrationRequested = false;
+static uint64_t g_stickCalibrationGeneration = 0;
+static int g_lastCalibrationLeftBucket = -1;
+static int g_lastCalibrationRightBucket = -1;
 
 // Write one formatted debug-input line to stderr AND (if opened) to the
 // mirror file so you can just `tail -f` the file without wrangling the
@@ -307,6 +311,71 @@ void emitDaemonEvent(const char *status, const char *detail) {
         + "\"detail\":\"" + jsonEscape(detail) + "\""
         + "}";
     emitJSONLine(line);
+}
+
+static void emitStickCalibrationEventWithSides(const char *state,
+                                               bool leftDone,
+                                               bool rightDone) {
+    NSString *detail = [NSString stringWithFormat:
+        @"state=%s left=%d right=%d leftSamples=%d rightSamples=%d",
+        state,
+        leftDone ? 1 : 0,
+        rightDone ? 1 : 0,
+        GetStickCalibrationSampleCount(JoyConSide::Left),
+        GetStickCalibrationSampleCount(JoyConSide::Right)];
+    emitDaemonEvent("stickCalibration", detail.UTF8String);
+}
+
+static void emitStickCalibrationEvent(const char *state) {
+    emitStickCalibrationEventWithSides(
+        state,
+        IsStickCalibrationComplete(JoyConSide::Left),
+        IsStickCalibrationComplete(JoyConSide::Right));
+}
+
+static void beginRequestedStickCalibration() {
+    BeginStickCalibration();
+    g_stickCalibrationRequested = true;
+    g_lastCalibrationLeftBucket = -1;
+    g_lastCalibrationRightBucket = -1;
+    uint64_t generation = ++g_stickCalibrationGeneration;
+    emitStickCalibrationEvent("waiting");
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
+                   dispatch_get_main_queue(), ^{
+        if (!g_stickCalibrationRequested ||
+            generation != g_stickCalibrationGeneration) {
+            return;
+        }
+        bool leftDone = IsStickCalibrationComplete(JoyConSide::Left);
+        bool rightDone = IsStickCalibrationComplete(JoyConSide::Right);
+        CancelStickCalibration();
+        g_stickCalibrationRequested = false;
+        emitStickCalibrationEventWithSides("expired", leftDone, rightDone);
+    });
+}
+
+static void updateRequestedStickCalibrationProgress() {
+    if (!g_stickCalibrationRequested) {
+        return;
+    }
+
+    bool leftDone = IsStickCalibrationComplete(JoyConSide::Left);
+    bool rightDone = IsStickCalibrationComplete(JoyConSide::Right);
+    if (leftDone && rightDone) {
+        g_stickCalibrationRequested = false;
+        emitStickCalibrationEvent("complete");
+        return;
+    }
+
+    int leftBucket = GetStickCalibrationSampleCount(JoyConSide::Left) / 10;
+    int rightBucket = GetStickCalibrationSampleCount(JoyConSide::Right) / 10;
+    if (leftBucket != g_lastCalibrationLeftBucket ||
+        rightBucket != g_lastCalibrationRightBucket) {
+        g_lastCalibrationLeftBucket = leftBucket;
+        g_lastCalibrationRightBucket = rightBucket;
+        emitStickCalibrationEvent("progress");
+    }
 }
 
 void toggleMouseMode() {
@@ -590,6 +659,8 @@ static void applyControlCommand(NSDictionary *command) {
             SetStickSensitivity(value.floatValue);
             emitDaemonEvent("stickSensitivity", [[NSString stringWithFormat:@"applied=%.2f", GetStickSensitivity()] UTF8String]);
         }
+    } else if ([cmd isEqualToString:@"calibrateSticks"]) {
+        beginRequestedStickCalibration();
     } else {
         emitDaemonEvent("controlUnknown",
                         [[NSString stringWithFormat:@"unknown cmd=%@", cmd] UTF8String]);
@@ -937,6 +1008,7 @@ void onJoyConData(const std::vector<uint8_t>& buffer, JoyConSide side) {
         // movement from buttons, left stick, and trigger noise.
         traceRightStickDecode(buffer, g_state.packetCount, g_state.rightStick);
     }
+    updateRequestedStickCalibrationProgress();
 
     g_state.buttons = sideButtons;
     // Write motion into the per-side slot. The JSON emitter below picks the
@@ -1012,7 +1084,10 @@ void onJoyConData(const std::vector<uint8_t>& buffer, JoyConSide side) {
         if (consumed) {
             // Only the gamepad-path values get the stripped data.
             sideButtonsForGamepad = ExtractButtonState(workingBuffer, side);
-            sideStickForGamepad   = DecodeJoystick(workingBuffer, side, JoyConOrientation::Upright);
+            // MouseEmitter always replaces the active side's raw stick bytes
+            // with the neutral pattern. Avoid decoding the same physical
+            // packet twice, which used to advance calibration twice.
+            sideStickForGamepad = { 0, 0, 0, 0 };
         }
     }
 

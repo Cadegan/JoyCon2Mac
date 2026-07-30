@@ -20,44 +20,70 @@ struct StickCalibration {
     long long stableSumX = 0;
     long long stableSumY = 0;
     bool calibrated = false;
+    bool calibrating = true;
 };
 
-static bool rawLooksLikeNeutral(int raw) {
-    return raw >= 1500 && raw <= 2300;
+static constexpr int kNominalStickCenter = 2048;
+static constexpr int kCalibrationCenterTolerance = 160;
+static constexpr int kCalibrationStableDelta = 4;
+static constexpr int kCalibrationSamples = 30;
+
+static StickCalibration g_leftStickCalibration;
+static StickCalibration g_rightStickCalibration;
+
+static StickCalibration& calibrationForSide(JoyConSide side) {
+    return side == JoyConSide::Left
+        ? g_leftStickCalibration
+        : g_rightStickCalibration;
 }
 
-static bool updateStickCalibration(StickCalibration& calibration, int rawX, int rawY) {
-    bool plausibleNeutral = rawLooksLikeNeutral(rawX) && rawLooksLikeNeutral(rawY);
-    bool stable = plausibleNeutral &&
-        (calibration.lastRawX == INT_MIN ||
-         (std::abs(rawX - calibration.lastRawX) <= 4 &&
-          std::abs(rawY - calibration.lastRawY) <= 4));
+static void resetCalibrationSamples(StickCalibration& calibration) {
+    calibration.lastRawX = INT_MIN;
+    calibration.lastRawY = INT_MIN;
+    calibration.stableSamples = 0;
+    calibration.stableSumX = 0;
+    calibration.stableSumY = 0;
+}
+
+static bool rawLooksLikeNeutral(int raw) {
+    return std::abs(raw - kNominalStickCenter) <= kCalibrationCenterTolerance;
+}
+
+static void updateStickCalibration(StickCalibration& calibration, int rawX, int rawY) {
+    if (!calibration.calibrating) {
+        return;
+    }
+
+    // Always validate candidates against the hardware's nominal center.
+    // Comparing against a previously learned center could make a bad saved
+    // center impossible to correct during an explicit recalibration.
+    bool plausibleNeutral = rawLooksLikeNeutral(rawX) &&
+                            rawLooksLikeNeutral(rawY);
+    if (!plausibleNeutral) {
+        resetCalibrationSamples(calibration);
+        return;
+    }
+
+    bool changedTooMuch = calibration.lastRawX != INT_MIN &&
+        (std::abs(rawX - calibration.lastRawX) > kCalibrationStableDelta ||
+         std::abs(rawY - calibration.lastRawY) > kCalibrationStableDelta);
+    if (changedTooMuch) {
+        resetCalibrationSamples(calibration);
+    }
 
     calibration.lastRawX = rawX;
     calibration.lastRawY = rawY;
-
-    if (!stable) {
-        calibration.stableSamples = 0;
-        calibration.stableSumX = 0;
-        calibration.stableSumY = 0;
-        return calibration.calibrated;
-    }
-
     calibration.stableSamples++;
     calibration.stableSumX += rawX;
     calibration.stableSumY += rawY;
 
-    static const int CAL_SAMPLES = 30;
-    if (calibration.stableSamples >= CAL_SAMPLES) {
+    if (calibration.stableSamples >= kCalibrationSamples) {
         calibration.centerX = static_cast<int>(calibration.stableSumX / calibration.stableSamples);
         calibration.centerY = static_cast<int>(calibration.stableSumY / calibration.stableSamples);
         calibration.calibrated = true;
-        calibration.stableSamples = 0;
-        calibration.stableSumX = 0;
-        calibration.stableSumY = 0;
+        calibration.calibrating = false;
+        calibration.stableSamples = kCalibrationSamples;
     }
-
-    return calibration.calibrated;
 }
 
 uint32_t ExtractButtonState(const std::vector<uint8_t>& buffer) {
@@ -110,6 +136,43 @@ float GetStickSensitivity() {
     return g_stickSensitivity;
 }
 
+void BeginStickCalibration() {
+    g_leftStickCalibration.calibrating = true;
+    g_rightStickCalibration.calibrating = true;
+    resetCalibrationSamples(g_leftStickCalibration);
+    resetCalibrationSamples(g_rightStickCalibration);
+}
+
+void CancelStickCalibration() {
+    if (!g_leftStickCalibration.calibrated) {
+        g_leftStickCalibration.centerX = kNominalStickCenter;
+        g_leftStickCalibration.centerY = kNominalStickCenter;
+        g_leftStickCalibration.calibrated = true;
+    }
+    if (!g_rightStickCalibration.calibrated) {
+        g_rightStickCalibration.centerX = kNominalStickCenter;
+        g_rightStickCalibration.centerY = kNominalStickCenter;
+        g_rightStickCalibration.calibrated = true;
+    }
+    g_leftStickCalibration.calibrating = false;
+    g_rightStickCalibration.calibrating = false;
+    resetCalibrationSamples(g_leftStickCalibration);
+    resetCalibrationSamples(g_rightStickCalibration);
+}
+
+bool IsStickCalibrationComplete(JoyConSide side) {
+    const StickCalibration& calibration = calibrationForSide(side);
+    return calibration.calibrated && !calibration.calibrating;
+}
+
+bool IsStickCalibrationInProgress(JoyConSide side) {
+    return calibrationForSide(side).calibrating;
+}
+
+int GetStickCalibrationSampleCount(JoyConSide side) {
+    return calibrationForSide(side).stableSamples;
+}
+
 StickData DecodeJoystick(const std::vector<uint8_t>& buffer, JoyConSide side, JoyConOrientation orientation) {
     if (buffer.size() < 16) {
         return { 0, 0, 0, 0 };
@@ -123,15 +186,10 @@ StickData DecodeJoystick(const std::vector<uint8_t>& buffer, JoyConSide side, Jo
     int x_raw = ((data[1] & 0x0F) << 8) | data[0];
     int y_raw = (data[2] << 4) | ((data[1] & 0xF0) >> 4);
 
-    // Per-controller auto-calibration: only accept a center after the raw
-    // stick stays still inside the normal neutral band. The old "first 30
-    // packets always win" path could poison the cached center if the daemon
-    // restarted while a stick was held, which showed up as permanent drift.
-    static StickCalibration leftCalibration;
-    static StickCalibration rightCalibration;
-    StickCalibration& calibration = isLeft ? leftCalibration : rightCalibration;
+    StickCalibration& calibration = calibrationForSide(side);
+    updateStickCalibration(calibration, x_raw, y_raw);
 
-    if (!updateStickCalibration(calibration, x_raw, y_raw)) {
+    if (!calibration.calibrated) {
         return { 0, 0, 0, 0 };
     }
 

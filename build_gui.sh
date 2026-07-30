@@ -2,6 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -z "${DEVELOPER_DIR:-}" ] &&
+   [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
+    export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+fi
 APP_DIR="$ROOT_DIR/build/JoyCon2Mac.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
@@ -23,7 +27,8 @@ fi
 
 echo "Building JoyCon2Mac daemon..."
 cmake -S "$ROOT_DIR" -B "$ROOT_DIR/build" -DCMAKE_BUILD_TYPE=Release
-cmake --build "$ROOT_DIR/build" --target joycon2mac --config Release --parallel "$(sysctl -n hw.ncpu)"
+BUILD_JOBS="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 4)"
+cmake --build "$ROOT_DIR/build" --target joycon2mac --config Release --parallel "$BUILD_JOBS"
 
 if [ ! -x "$DAEMON" ]; then
     echo "Expected daemon not found at $DAEMON" >&2
@@ -73,7 +78,7 @@ cat > "$HELPER_CONTENTS/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-swiftc \
+xcrun --sdk macosx swiftc \
     -target arm64-apple-macosx13.0 \
     -O \
     -framework SwiftUI \
@@ -86,6 +91,9 @@ swiftc \
     -o "$MACOS_DIR/JoyCon2Mac"
 
 codesign -s "$SIGN_IDENTITY" -f "$HELPER_APP" >/dev/null
-codesign -s "$SIGN_IDENTITY" -f --deep --generate-entitlement-der --entitlements "$APP_ENTITLEMENTS" "$APP_DIR" >/dev/null
+# Sign inside-out. The helper is already signed above; signing the outer app
+# without --deep preserves the helper's own signature and entitlements.
+codesign -s "$SIGN_IDENTITY" -f --generate-entitlement-der \
+    --entitlements "$APP_ENTITLEMENTS" "$APP_DIR" >/dev/null
 
 echo "Built: $APP_DIR"
