@@ -913,6 +913,16 @@ class DaemonBridge: ObservableObject {
             DispatchQueue.main.async { [weak self] in
                 if status == "started" { self?.isDaemonRunning = true }
                 else if status == "exiting" { self?.isDaemonRunning = false }
+                else if status == "driverReady" {
+                    let message = "Driver extension is loaded and connected."
+                    self?.driverInstallStatus = message
+                    TelemetryStore.shared.updateDriverStatus(message)
+                }
+                else if status == "driverMissing" {
+                    let message = "Driver extension is not connected; system gamepad and mouse output are unavailable."
+                    self?.driverInstallStatus = message
+                    TelemetryStore.shared.updateDriverStatus(message)
+                }
                 else if status == "findJoyCon" { self?.applyFindStatus(detail) }
                 else if status == "stickCalibration" {
                     self?.applyStickCalibrationStatus(detail)
@@ -1516,12 +1526,26 @@ class DaemonBridge: ObservableObject {
     }
 
     private func markControllersDisconnected(status: String) {
+        // A final state packet may already be queued for the main thread when
+        // Stop is pressed. Clear those snapshots first so they cannot turn the
+        // controller cards back to "streaming" after we mark them offline.
+        ingestQueue.sync {
+            pendingStateSnapshots.removeAll(keepingCapacity: true)
+            pendingStatusSnapshots.removeAll(keepingCapacity: true)
+            lastIngestTime.removeAll(keepingCapacity: true)
+            mainApplyScheduled = false
+        }
+
         var updated = controllers
         for index in updated.indices {
             updated[index].isConnected = false
             updated[index].status = status
         }
         controllers = updated
+        findingLeftJoyCon = false
+        findingRightJoyCon = false
+        isCalibratingSticks = false
+        stickCalibrationStatus = "Sticks calibrate automatically when first connected."
         stateRevision &+= 1
     }
 

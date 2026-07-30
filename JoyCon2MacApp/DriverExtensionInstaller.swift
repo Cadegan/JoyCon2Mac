@@ -143,10 +143,12 @@ final class DriverExtensionInstaller: NSObject, OSSystemExtensionRequestDelegate
     // matching service exists in IOKit right now, the driver is loaded and
     // usable regardless of what the SystemExtensions request delegate reports.
     private func isDriverAlreadyLive() -> Bool {
-        // IOServiceMatching on "VirtualJoyConDriver" gives us the specific
-        // class, then we cross-check CFBundleIdentifier / IOUserServerName to
-        // guard against unrelated services that happened to share the name.
-        guard let matching = IOServiceMatching("VirtualJoyConDriver") else {
+        // DriverKit publishes the root as IOUserService and exposes the C++
+        // class through IOUserClass. IOServiceMatching("VirtualJoyConDriver")
+        // is not reliable on every macOS release, so enumerate IOUserService
+        // exactly like DriverKitClient's proven fallback and cross-check the
+        // bundle/server properties below.
+        guard let matching = IOServiceMatching("IOUserService") else {
             return false
         }
         var iterator: io_iterator_t = 0

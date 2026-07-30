@@ -150,6 +150,21 @@ preflight_bundle() {
         failed=1
     fi
 
+    if [ "$SIGN_IDENTITY" = "-" ]; then
+        local sip_status
+        sip_status="$(/usr/bin/csrutil status 2>/dev/null || true)"
+        if printf '%s\n' "$sip_status" |
+           /usr/bin/grep -Eq 'System Integrity Protection status: disabled[.]?'; then
+            echo "Ad hoc/SIP mode  OK"
+        else
+            echo "Ad hoc/SIP mode  FAILED: an ad hoc DriverKit build requires SIP disabled on this isolated development Mac." >&2
+            echo "Use a valid Apple development identity/provisioning setup, or disable SIP only for local testing." >&2
+            failed=1
+        fi
+    else
+        echo "Signing identity OK ($SIGN_IDENTITY)"
+    fi
+
     if [ "$failed" -ne 0 ]; then
         echo "Not ready for hardware test." >&2
         return 1

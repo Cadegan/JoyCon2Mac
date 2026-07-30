@@ -70,7 +70,7 @@ struct SettingsView: View {
                         daemonBridge.restartDaemon()
                     }
                 ))
-                .help("Expose only the DualSense-compatible HID device for SDL/cloud clients")
+                .help("Expose only the DualSense-compatible gamepad to controller clients; the virtual mouse remains available")
 
                 SettingsActionRow(
                     icon: "puzzlepiece.extension",

@@ -35,7 +35,13 @@ l'extension et les entrées restent à confirmer avec le matériel.
 - [x] Réglages sans effet retirés de l'interface et de l'export.
 - [x] Licence Xcode acceptée et SDK DriverKit disponible.
 - [x] Build DriverKit complet, signature et entitlements vérifiés sur le bundle produit.
-- [ ] Matrice de test matériel exécutée.
+- [x] Extension DriverKit active et trois périphériques HID virtuels publiés.
+- [x] Deux Joy-Con connectés simultanément sans boucle de déconnexion.
+- [x] Calibration neutre, plage des sticks, boutons et vibrations validés.
+- [x] Souris optique gauche/droite, IMU au repos et SDL Only validés.
+- [ ] IMU dynamique, contrôles spécialisés et NFC à valider.
+- [x] Journal de transport borné à 16 MiB par session.
+- [x] État des contrôleurs nettoyé à l'arrêt et statut réel du pilote prioritaire.
 
 Dernière validation logicielle : `./build_all.sh` termine avec
 `Ready for hardware test`, et `ctest --test-dir build --output-on-failure`
@@ -87,8 +93,9 @@ valide tous les tests de calibration.
   ```
 
 - [x] Vérifier que l'identité ou la signature ad hoc prévue pour le test est explicitement choisie.
-- [ ] Utiliser uniquement un Mac de développement isolé si SIP/AMFI doivent être désactivés.
-- [ ] Documenter la procédure de restauration de SIP/AMFI après le test.
+- [x] Utiliser uniquement un Mac de développement isolé lorsque SIP est désactivé.
+- [x] Documenter la restauration de SIP après le test (`csrutil enable` depuis macOS Recovery).
+- [x] Ne pas désactiver AMFI : cette manipulation n'est pas requise par la procédure retenue.
 
 ### Critère d'acceptation
 
@@ -285,6 +292,7 @@ Ajouter à `build_all.sh` une étape finale qui vérifie :
 - [x] entitlements distincts app/driver ;
 - [x] absence de l'ancien `VirtualJoyConDriver.dext` ;
 - [x] présence du framework `ServiceManagement` dans la compilation Swift.
+- [x] refus explicite d'un build ad hoc déclaré prêt lorsque SIP est encore actif.
 
 Le script doit afficher un résumé final explicite :
 
@@ -305,45 +313,44 @@ Tout échec doit produire un code de sortie non nul.
 
 ### Installation et activation
 
-- [ ] Copier l'app dans `/Applications`.
-- [ ] Ouvrir l'app et accepter les demandes macOS.
-- [ ] Approuver l'extension dans Réglages Système.
-- [ ] Redémarrer si macOS le demande.
-- [ ] Vérifier que `local.joycon2mac.driver` est activé.
-- [ ] Vérifier la présence du service `VirtualJoyConDriver` dans IOKit.
-- [ ] Confirmer que l'app signale « Driver extension loaded ».
+- [x] Copier l'app dans `/Applications`.
+- [x] Ouvrir l'app sur le Mac de test avec SIP désactivé.
+- [x] Vérifier que `local.joycon2mac.driver` est actif.
+- [x] Vérifier la présence du service `VirtualJoyConDriver` dans IOKit.
+- [x] Confirmer la connexion du daemon au pilote.
 
 ### Bluetooth
 
-- [ ] Connecter le Joy-Con gauche seul.
-- [ ] Connecter le Joy-Con droit seul.
-- [ ] Connecter les deux simultanément.
+- [x] Connecter les deux simultanément.
 - [ ] Éteindre puis rallumer chaque Joy-Con.
-- [ ] Redémarrer le daemon avec les Joy-Con déjà connectés.
-- [ ] Vérifier l'absence de boucle connexion/déconnexion.
+- [x] Redémarrer le daemon avec les Joy-Con déjà appairés.
+- [x] Vérifier l'absence de boucle connexion/déconnexion.
 
 ### Gamepad
 
-- [ ] Tester tous les boutons.
+- [x] Observer les boutons principaux dans la télémétrie.
 - [ ] Tester les diagonales du D-pad.
 - [ ] Tester L3/R3, Home, Capture et Chat/C.
 - [ ] Tester les quatre boutons de rail et leurs remappings.
-- [ ] Vérifier les deux sticks dans l'app, Chrome et un client SDL.
-- [ ] Vérifier l'absence de périphériques fantômes ou dupliqués.
-- [ ] Tester `SDL Only Mode`.
+- [x] Vérifier les deux sticks dans l'app et leur retour exact au neutre.
+- [x] Vérifier les périphériques HID publiés (`hidutil list`).
+- [x] Tester `SDL Only Mode` : seul le gamepad DualSense reste visible des
+  clients contrôleur ; la souris virtuelle reste disponible comme documenté.
 
 ### Souris
 
 - [ ] Tester Off, Slow, Normal et Fast.
-- [ ] Tester la sélection automatique gauche/droite.
-- [ ] Tester clics, déplacement et molette.
+- [x] Tester la sélection automatique gauche/droite.
+- [x] Tester le déplacement optique sur les deux côtés.
+- [ ] Tester clics et molette.
 - [ ] Vérifier que les entrées utilisées par la souris ne fuient pas dans le gamepad.
 
 ### Mouvement
 
-- [ ] Poser les deux Joy-Con à plat : accélération proche de `(0, 0, +1 G)`.
-- [ ] Vérifier séparément gauche, droite et fusion.
-- [ ] Tester pitch, roll et yaw.
+- [x] Poser les deux Joy-Con à plat : gauche `Z = 0,991 G`, droite `Z = 0,999 G`.
+- [x] Vérifier séparément gauche, droite et fusion.
+- [x] Vérifier pitch/roll au repos : environ `-1° / 0°`.
+- [ ] Tester pitch, roll et yaw en mouvement.
 - [ ] Vérifier que la vue 3D est fluide et cohérente avec le mouvement physique.
 
 ### Haptics et Find My

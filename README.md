@@ -17,10 +17,12 @@ The extension is not notarized and is not distributed through Apple's normal Dri
 For this current development release, install and testing require:
 
 - SIP disabled
-- AMFI disabled
 - A Mac you are comfortable using for driver development
 
-Do not treat this as a normal consumer install yet. Re-enable SIP/AMFI when you are done testing other software. A future production release should use proper signing, notarization, and Apple-granted DriverKit entitlements instead of this local development setup.
+Disabling AMFI is not part of the supported procedure. Do not treat this as a
+normal consumer install yet. Re-enable SIP when you are done testing. A future
+production release should use proper signing, notarization, and Apple-granted
+DriverKit entitlements instead of this local development setup.
 
 ### Install From Release
 
@@ -56,7 +58,7 @@ build/JoyCon2Mac.app/Contents/Library/SystemExtensions/
 - Exposes a virtual DualSense controller for Chrome, macOS GameController clients, SDL, RPCS3, Ryujinx, Game Pass, GeForce NOW, and other cloud gaming apps.
 - Supports face buttons, D-pad, shoulders, ZL/ZR, sticks, stick clicks, Plus/Minus, Home, Capture, Chat/C, and rail buttons.
 - Routes DualSense rumble output back to both Joy-Cons.
-- Provides `SDL Only Mode`, which exposes only the DualSense-compatible HID path and hides the generic Joy-Con/mouse devices from strict clients. This fixes duplicate-controller and connect/disconnect churn in cloud apps.
+- Provides `SDL Only Mode`, which hides the generic Joy-Con gamepad from controller clients while keeping the DualSense-compatible gamepad and virtual mouse available. This fixes duplicate-controller and connect/disconnect churn in cloud apps without removing mouse navigation.
 - Keeps stable HID identity fields, including serials and nonzero location IDs, so apps are less likely to treat the virtual devices as hotplug churn.
 
 ### Mouse
@@ -103,7 +105,7 @@ build/JoyCon2Mac.app/Contents/Library/SystemExtensions/
 
 ## Known Limitations
 
-- The DriverKit extension is currently local/unverified and needs SIP plus AMFI disabled.
+- The DriverKit extension is currently local/unverified and needs SIP disabled for the ad hoc development build.
 - NFC UI exists, but the backend is not finished.
 - True macOS trackpad multitouch gestures are not implemented. Mouse mode is a HID mouse with wheel scrolling, not a virtual trackpad.
 - Joy-Con yaw cannot be absolute without a magnetometer. It can be integrated while moving, but it will drift.
@@ -129,7 +131,7 @@ Leave `SDL Only Mode` off when you want:
 
 ### The App Opens But No Controller Appears
 
-1. Confirm SIP and AMFI are disabled on the test Mac.
+1. Confirm SIP is disabled on the isolated test Mac.
 2. Open `System Settings -> Privacy & Security` and approve the system extension.
 3. Restart if macOS asks.
 4. Launch JoyCon2Mac again.
@@ -171,7 +173,7 @@ Use an app that sends controller vibration through the DualSense output report p
 - Xcode with DriverKit support
 - Xcode command line tools
 - CMake 3.20 or newer
-- Local driver-development machine with SIP/AMFI disabled for this unverified build
+- Local driver-development machine with SIP disabled for this ad hoc build
 
 ## Build Commands
 

@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <signal.h>
+#include <unistd.h>
 
 // Global state for tracking controller data
 struct ControllerState {
@@ -60,6 +61,12 @@ static NSDate *g_lastPrintTime = nil;
 static NSDate *g_lastJSONLeftTime = nil;
 static NSDate *g_lastJSONRightTime = nil;
 static const NSTimeInterval kJSONStateIntervalSeconds = 1.0 / 120.0;
+// daemon.jsonl is both the GUI transport and a diagnostic log. Keep the
+// display-rate state stream, but bound the file so a daemon left running for
+// days cannot consume unbounded disk space. DaemonBridge detects a shrinking
+// file and resumes reading from offset zero.
+static constexpr long kMaxJSONLogBytes = 16L * 1024L * 1024L;
+static unsigned int g_jsonLinesUntilSizeCheck = 256;
 static DriverKitClient *g_driverClient = nil;
 static MouseEmitter *g_mouseEmitter = nil;
 static BLEManager *g_bleManager = nil;
@@ -191,6 +198,21 @@ static void traceRightStickTransmit(uint32_t packetCount, JoyConSide side, const
 static void emitJSONLine(const std::string& line) {
     std::cout << line << std::endl;
     if (g_jsonFile) {
+        if (--g_jsonLinesUntilSizeCheck == 0) {
+            g_jsonLinesUntilSizeCheck = 256;
+            fflush(g_jsonFile);
+            long currentSize = ftell(g_jsonFile);
+            if (currentSize >= kMaxJSONLogBytes) {
+                int descriptor = fileno(g_jsonFile);
+                if (descriptor >= 0 && ftruncate(descriptor, 0) == 0) {
+                    rewind(g_jsonFile);
+                    fprintf(
+                        g_jsonFile,
+                        "{\"event\":\"daemon\",\"status\":\"logRotated\","
+                        "\"detail\":\"daemon.jsonl reached the 16 MiB session limit\"}\n");
+                }
+            }
+        }
         fprintf(g_jsonFile, "%s\n", line.c_str());
         fflush(g_jsonFile);
     }
